@@ -1,3 +1,4 @@
+require 'json'
 module ActsAsCached
   module ClassMethods
     @@nil_sentinel = :_nil
@@ -18,12 +19,19 @@ module ActsAsCached
       # head off to get_caches if we were passed multiple cache_ids
       if args.size > 1
         return get_caches(args, options)
-      else
-        cache_id = args.first
+      end
+
+      # Generate unique cache_id
+      cache_id = "#{args.first.to_s}#{cache_key_separator}#{options.to_json}"
+      search_id = args.first
+      
+      # Adhere to Rails cache policy
+      if !Rails.application.config.action_controller.perform_caching
+        return fetch_cachable_data(search_id, options)
       end
 
       if (item = fetch_cache(cache_id)).nil?
-        set_cache(cache_id, block_given? ? yield : fetch_cachable_data(cache_id), options)
+        set_cache(cache_id, block_given? ? yield : fetch_cachable_data(search_id, options), cache_options)
       else
         @@nil_sentinel == item ? nil : item
       end
@@ -36,27 +44,36 @@ module ActsAsCached
     #
     def get_caches(*args)
       options   = args.last.is_a?(Hash) ? args.pop : {}
-      cache_ids = args.flatten.map(&:to_s)
-      keys      = cache_keys(cache_ids)
+      # Serialize options parameters
+      serialized_options = options.to_json
+      
+      # Create unique cache keys
+      cache_ids = args.flatten.map{|arg| "#{arg.to_s}#{cache_key_separator}#{serialized_options}"}
 
+      # Create array of cache keys to get
+      cache_keys = cache_keys(cache_ids)
+      
+      # Create search id map
+      search_ids = args.flatten.map{|arg| arg.to_s}
+      
       # Map memcache keys to object cache_ids in { memcache_key => object_id } format
-      keys_map = Hash[*keys.zip(cache_ids).flatten]
+      search_keys_map = Hash[*cache_keys.zip(search_ids).flatten]
 
       # Call get_multi and figure out which keys were missed based on what was a hit
-      hits = Rails.cache.read_multi(*keys) || {}
+      hits = Rails.cache.read_multi(*cache_keys) || {}
 
       # Misses can take the form of key => nil
       hits.delete_if { |key, value| value.nil? }
 
-      misses = keys - hits.keys
+      misses = cache_keys - hits.keys
       hits.each { |k, v| hits[k] = nil if v == @@nil_sentinel }
 
       # Return our hash if there are no misses
       return hits.values.index_by(&:cache_id) if misses.empty?
 
       # Find any missed records
-      needed_ids     = keys_map.values_at(*misses)
-      missed_records = Array(fetch_cachable_data(needed_ids))
+      needed_ids     = search_keys_map.values_at(*misses)
+      missed_records = Array(fetch_cachable_data(needed_ids, options))
 
       # Cache the missed records
       missed_records.each { |missed_record| missed_record.set_cache(options) }
@@ -89,8 +106,54 @@ module ActsAsCached
     end
     alias :clear_cache :expire_cache
 
-    def reset_cache(cache_id = nil)
-      set_cache(cache_id, fetch_cachable_data(cache_id))
+    def reset_cache(*args)
+      options = args.last.is_a?(Hash) ? args.pop : {}
+      args    = args.flatten
+
+      # Detect any read/write splitting gems
+      if defined?(Makara)
+        connection.stick_to_master!
+      end
+
+      ##
+      # head off to reset_caches if we were passed multiple cache_ids
+      if args.size > 1
+        return reset_caches(args, options)
+      end
+
+      # Generate unique cache_id
+      cache_id = "#{args.first.to_s}#{cache_key_separator}#{options.to_json}"
+      search_id = args.first
+      if defined?(DbCharmer)
+        set_cache(cache_id, fetch_cachable_data(search_id, options))
+      else
+        set_cache(cache_id, on_master.fetch_cachable_data(search_id, options))
+      end
+    end
+    
+    def reset_caches(*args)
+      options   = args.last.is_a?(Hash) ? args.pop : {}
+
+      # Detect any read/write splitting gems
+      if defined?(Makara)
+        connection.stick_to_master!
+      end
+
+      # Create search id map
+      search_ids = args.flatten.map{|arg| arg.to_s}
+      
+      # Retreives all records
+      if defined?(DbCharmer)
+        records = Array(on_master.fetch_cachable_data(search_ids, options))
+      else
+        records = Array(fetch_cachable_data(search_ids, options))
+      end
+
+      # Cache the missed records
+      records.each { |record| record.set_cache(options) }
+      
+      # Return all records to user
+      records
     end
 
     ##
@@ -150,12 +213,13 @@ module ActsAsCached
       Rails.cache.read(cache_key(cache_id))
     end
 
-    def fetch_cachable_data(cache_id = nil)
+    def fetch_cachable_data(cache_id = nil, options = {})
       finder = cache_config[:finder] || :find
-      return send(finder) unless cache_id
+      return send(finder, options) unless cache_id
 
-      args = [cache_id]
-      args << cache_options.dup unless cache_options.blank?
+      args = [cache_id, options]
+      # Cache options added to write instead for ttl settings
+      #args << cache_options.dup unless cache_options.blank?
       send(finder, *args)
     end
 

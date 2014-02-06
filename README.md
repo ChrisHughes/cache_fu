@@ -1,3 +1,20 @@
+
+#Modified version of Cache_Fu
+
+##Changes from Surendra Singhi's version
+
+* Adds support for complex queries with multiple parameter parts
+
+* Adds ability to pass expires_in to acts_as_cached
+
+* Adds adherence to Rails's global action_controller.perform_caching setting
+
+* Adds ability to use cache namespacing
+
+* Supports master / slave database read / write splitting, where resetting the cache reads from the database master for both Makara and DbCharmer
+
+#Original ReadMe
+
 #cache_fu
 
 A rewrite of acts_as_cached.
