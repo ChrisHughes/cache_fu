@@ -13,6 +13,7 @@
 
 * Supports master / slave database read / write splitting, where resetting the cache reads from the database master for both Makara and DbCharmer
 
+* Adds key hashing for keys that exceed max length
 
 ##Examples
 
