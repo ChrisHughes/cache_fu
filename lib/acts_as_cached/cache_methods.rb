@@ -6,11 +6,38 @@ module ActsAsCached
     def cache_config
       @cache_config ||= {}
     end
-
-    def cache_options
+    
+    def cache_options(options={})
       cache_config[:options] ||= {}
+      cache_config[:options].merge(filter_options(options))
     end
-
+    
+    def filter_options(options)
+      # Returns options without keys specific to memcached included
+      options.reject{|k| ActsAsCached.valued_keys.include?(k)}
+    end
+    
+    def get_cache_id(args, options)
+      # Returns optimized cache id string
+      output = ""
+      if options.is_a?(String)
+        options_string = options
+      end
+      options_string ||= filter_options(options).to_json
+      output += "#{args.first.to_s}"
+      if options_string != "{}"
+        output += "#{cache_key_separator}#{options_string}"
+      end
+      output
+    end
+    
+    def get_cache_ids(args, options)
+      # Gets cache ids for multiple values
+      options_string = filter_options(options).to_json
+      # Flatten array and process for each
+      args.flatten.map{|arg| get_cache_id([arg.to_s], options_string)}
+    end
+    
     def get_cache(*args)
       options = args.last.is_a?(Hash) ? args.pop : {}
       args    = args.flatten
@@ -22,7 +49,7 @@ module ActsAsCached
       end
 
       # Generate unique cache_id
-      cache_id = "#{args.first.to_s}#{cache_key_separator}#{options.to_json}"
+      cache_id = get_cache_id(args, options)
       search_id = args.first
       
       # Adhere to Rails cache policy
@@ -30,8 +57,8 @@ module ActsAsCached
         return fetch_cachable_data(search_id, options)
       end
 
-      if (item = fetch_cache(cache_id)).nil?
-        set_cache(cache_id, block_given? ? yield : fetch_cachable_data(search_id, options), cache_options)
+      if (item = fetch_cache(cache_id, options)).nil?
+        set_cache(cache_id, block_given? ? yield : fetch_cachable_data(search_id, options), options)
       else
         @@nil_sentinel == item ? nil : item
       end
@@ -44,14 +71,12 @@ module ActsAsCached
     #
     def get_caches(*args)
       options   = args.last.is_a?(Hash) ? args.pop : {}
-      # Serialize options parameters
-      serialized_options = options.to_json
       
       # Create unique cache keys
-      cache_ids = args.flatten.map{|arg| "#{arg.to_s}#{cache_key_separator}#{serialized_options}"}
+      cache_ids = get_cache_ids(args, options)
 
       # Create array of cache keys to get
-      cache_keys = cache_keys(cache_ids)
+      cache_keys = cache_keys(cache_ids, options)
       
       # Create search id map
       search_ids = args.flatten.map{|arg| arg.to_s}
@@ -96,12 +121,12 @@ module ActsAsCached
 
     def set_cache(cache_id, value, options = nil)
       v = value.nil? ? @@nil_sentinel : value
-      Rails.cache.write(cache_key(cache_id), v, options)
+      Rails.cache.write(cache_key(cache_id, options), v, cache_options(options))
       value
     end
 
-    def expire_cache(cache_id = nil)
-      Rails.cache.delete(cache_key(cache_id))
+    def expire_cache(cache_id = nil, options = {})
+      Rails.cache.delete(cache_key(cache_id, options))
       true
     end
     alias :clear_cache :expire_cache
@@ -122,12 +147,12 @@ module ActsAsCached
       end
 
       # Generate unique cache_id
-      cache_id = "#{args.first.to_s}#{cache_key_separator}#{options.to_json}"
+      cache_id = get_cache_id(args, options)
       search_id = args.first
       if defined?(DbCharmer)
-        set_cache(cache_id, fetch_cachable_data(search_id, options))
+        set_cache(cache_id, on_master.fetch_cachable_data(search_id, options), cache_options(options))
       else
-        set_cache(cache_id, on_master.fetch_cachable_data(search_id, options))
+        set_cache(cache_id, fetch_cachable_data(search_id, options), cache_options(options))
       end
     end
     
@@ -209,15 +234,15 @@ module ActsAsCached
     end
     alias :is_cached? :cached?
 
-    def fetch_cache(cache_id)
-      Rails.cache.read(cache_key(cache_id))
+    def fetch_cache(cache_id, options = {})
+      Rails.cache.read(cache_key(cache_id, options))
     end
 
     def fetch_cachable_data(cache_id = nil, options = {})
       finder = cache_config[:finder] || :find
-      return send(finder, options) unless cache_id
+      return send(finder, filter_options(options)) unless cache_id
 
-      args = [cache_id, options]
+      args = [cache_id, filter_options(options)]
       # Cache options added to write instead for ttl settings
       #args << cache_options.dup unless cache_options.blank?
       send(finder, *args)
@@ -241,12 +266,23 @@ module ActsAsCached
       @cache_name ||= respond_to?(:model_name) ? model_name.cache_key : name
     end
 
-    def cache_keys(*cache_ids)
-      cache_ids.flatten.map { |cache_id| cache_key(cache_id) }
+    def cache_keys(cache_ids, options = {})
+      cache_ids.flatten.map { |cache_id| cache_key(cache_id, options) }
     end
 
-    def cache_key(cache_id)
-      [cache_name, cache_config[:version], cache_id].compact.join(cache_key_separator).gsub(' ', '_')[0..(max_key_length - 1)]
+    def cache_key(cache_id, options = {})
+      # Generate cache key
+      namespace = ""
+      if options[:namespace]
+        namespace = options[:namespace].to_s + ":"
+      end
+      key = [cache_name, cache_config[:version], cache_id].compact.join(cache_key_separator).gsub(' ', '_')
+      if key.length + namespace.length > max_key_length
+        # Hash if key exceeds max_key_length
+        key = Digest::MD5.hexdigest(key)
+      end
+      output = namespace + key
+      output[0..(max_key_length - 1)]
     end
     
     def cache_key_separator

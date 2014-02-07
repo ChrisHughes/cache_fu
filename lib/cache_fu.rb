@@ -15,7 +15,7 @@ module ActsAsCached
   end
 
   def self.valued_keys
-    [:version, :pages, :per_page, :finder, :cache_id, :find_by, :key_size]
+    [:version, :pages, :per_page, :finder, :cache_id, :find_by, :key_size, :namespace]
   end
 
   module Mixin
