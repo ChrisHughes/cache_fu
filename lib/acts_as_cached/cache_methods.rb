@@ -51,11 +51,6 @@ module ActsAsCached
       # Generate unique cache_id
       cache_id = get_cache_id(args, options)
       search_id = args.first
-      
-      # Adhere to Rails cache policy
-      if !Rails.application.config.action_controller.perform_caching
-        return fetch_cachable_data(search_id, options)
-      end
 
       if (item = fetch_cache(cache_id, options)).nil?
         set_cache(cache_id, block_given? ? yield : fetch_cachable_data(search_id, options), options)
