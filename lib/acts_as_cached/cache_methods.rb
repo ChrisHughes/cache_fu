@@ -51,6 +51,11 @@ module ActsAsCached
       # Generate unique cache_id
       cache_id = get_cache_id(args, options)
       search_id = args.first
+      
+      # Adhere to Rails cache policy
+      if !cache_config[:perform_caching]
+        return fetch_cachable_data(search_id, options)
+      end
 
       if (item = fetch_cache(cache_id, options)).nil?
         set_cache(cache_id, block_given? ? yield : fetch_cachable_data(search_id, options), options)
@@ -79,8 +84,13 @@ module ActsAsCached
       # Map memcache keys to object cache_ids in { memcache_key => object_id } format
       search_keys_map = Hash[*cache_keys.zip(search_ids).flatten]
 
-      # Call get_multi and figure out which keys were missed based on what was a hit
-      hits = Rails.cache.read_multi(*cache_keys) || {}
+      # Adhere to Rails cache policy
+      if !cache_config[:perform_caching]
+        # Call get_multi and figure out which keys were missed based on what was a hit
+        hits = Rails.cache.read_multi(*cache_keys) || {}
+      else
+        hits = {}
+      end
 
       # Misses can take the form of key => nil
       hits.delete_if { |key, value| value.nil? }

@@ -5,7 +5,7 @@ require File.dirname(__FILE__) + '/acts_as_cached/railtie' if defined?(Rails::Ra
 module ActsAsCached
   @@config = {}
   mattr_reader :config
-
+    
   def self.config=(options)
     @@config = options
   end
@@ -24,15 +24,16 @@ module ActsAsCached
       include InstanceMethods
 
       options.symbolize_keys!
-
+      options.merge!(ActsAsCached.config.symbolize_keys)
+      
       # convert the find_by shorthand
       if find_by = options.delete(:find_by)
         options[:finder]   = "find_by_#{find_by}".to_sym
         options[:cache_id] = find_by
       end
-
-      cache_config.replace  options.reject { |key,| not ActsAsCached.valued_keys.include? key }
-      cache_options.replace options.reject { |key,| ActsAsCached.valued_keys.include? key }
+      
+      cache_config = options.select { |key,| ActsAsCached.valued_keys.include? key }
+      cache_options = options.reject { |key,| ActsAsCached.valued_keys.include? key }
     end
   end
 end

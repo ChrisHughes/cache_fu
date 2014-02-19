@@ -7,13 +7,15 @@
 
 * Adds ability to pass expires_in to acts_as_cached
 
-* Adds adherence to Rails's global action_controller.perform_caching setting
+* Allows enabling or disabling of caching with config.cache_fu.perform_caching in environment file
 
 * Adds ability to use cache namespacing
 
 * Supports master / slave database read / write splitting, where resetting the cache reads from the database master for both Makara and DbCharmer
 
 * Adds key hashing for keys that exceed max length
+
+* Adds global configuration inheritance from config.cache_fu
 
 ##Examples
 
