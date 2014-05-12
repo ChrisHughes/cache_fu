@@ -3,11 +3,14 @@ require 'rails'
 
 module ActsAsCached
   class Railtie < Rails::Railtie
-    
     config.cache_fu = ActiveSupport::OrderedOptions.new
-    initializer "cache_fu.set_configs" do |app|
-      app.config.cache_fu.perform_caching ||= true
-      app.config.cache_fu.each { |k,v| ActsAsCached.config[k] = v }
+    initializer "cache_fu.configure" do |app|
+      # Set default
+      if !app.config.cache_fu.has_key? :perform_caching
+        app.config.cache_fu[:perform_caching] = true
+      end
+      # Set value
+      ActsAsCached.config[:perform_caching] = app.config.cache_fu[:perform_caching]
     end
     initializer 'cache_fu.extends' do
       ActiveSupport.on_load :active_record do
