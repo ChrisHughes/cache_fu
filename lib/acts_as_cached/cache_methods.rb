@@ -9,12 +9,16 @@ module ActsAsCached
     
     def cache_options(options={})
       cache_config[:options] ||= {}
-      cache_config[:options].merge(filter_options(options))
+      cache_config[:options].merge(filter_options(options, inverse=true))
     end
     
-    def filter_options(options)
+    def filter_options(options, inverse=false)
       # Returns options without keys specific to memcached included
-      options.reject{|k| ActsAsCached.valued_keys.include?(k)}
+      if inverse
+        options.select{|k| ActsAsCached.valued_keys.include?(k)}
+      else
+        options.reject{|k| ActsAsCached.valued_keys.include?(k)}
+      end
     end
     
     def get_cache_id(args, options)
